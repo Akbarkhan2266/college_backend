@@ -10,7 +10,7 @@ import {
 } from '../controller/notice/notice.controller.js';
 import { auth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
-import { uploadNoticePdf } from '../middleware/upload.js';
+import { uploadNoticePdf, uploadNoticePdfMiddleware } from '../middleware/upload.js';
 
 const router = Router();
 
@@ -21,13 +21,13 @@ router.get('/', getNotices);
 router.get('/:id', getNoticeById);
 router.post(
   '/',
-  uploadNoticePdf.single('pdf'),
+  uploadNoticePdfMiddleware,
   validate(noticeSchema),
   createNotice
 );
 router.patch(
   '/:id',
-  uploadNoticePdf.single('pdf'),
+  uploadNoticePdfMiddleware,
   validate(updateNoticeSchema),
   updateNotice
 );

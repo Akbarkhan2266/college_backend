@@ -42,11 +42,28 @@ app.use(
 );
 
 app.use(cookieParser(process.env.COOKIE_SECRET));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Serve static files for PDF uploads
-app.use('/uploads', express.static(path.resolve('uploads')));
+// Serve static files for uploads
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const baseUploadDir = isServerless ? '/tmp/uploads' : path.resolve('uploads');
+app.use('/uploads', express.static(baseUploadDir));
+
+// Root welcome endpoint for Vercel / browser checks
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'College Portal Backend API is running successfully',
+    environment: process.env.NODE_ENV || 'development',
+    endpoints: {
+      health: '/health',
+      public: '/api/public',
+      admin: '/api/admin',
+      student: '/api/student',
+    },
+  });
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -75,6 +92,14 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('[Global Error Handler]:', err);
 
+  // Request payload too large (413)
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      message: 'Request payload is too large. Maximum allowed size is 50MB.',
+    });
+  }
+
   // Multer file upload errors
   if (err.name === 'MulterError') {
     return res.status(400).json({
@@ -84,7 +109,7 @@ app.use((err, req, res, next) => {
   }
 
   // File filter custom error
-  if (err.message && err.message.includes('Only PDF files are allowed')) {
+  if (err.message && (err.message.includes('Only PDF files are allowed') || err.message.includes('Only image files'))) {
     return res.status(400).json({
       success: false,
       message: err.message,

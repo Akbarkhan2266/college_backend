@@ -11,12 +11,12 @@ import {
 } from '../../models.js';
 import { generateStudentId } from '../../utils/generateStudentId.js';
 import { generatePassword } from '../../utils/generatePassword.js';
-import { sendNewAdmissionEmail } from '../../utils/mailer.js';
+import { sendNewAdmissionEmail, sendAdmissionApprovalEmail } from '../../utils/mailer.js';
 
 export const submitAdmissionSchema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
   phone: z.string().trim().min(7, 'Valid phone number is required'),
-  email: z.string().email('Valid email is required').optional().or(z.literal('')),
+  email: z.string().trim().email('Valid email is required'),
   guardianName: z.string().trim().optional(),
   address: z.string().trim().optional(),
   dob: z.string().optional().refine((val) => !val || !isNaN(Date.parse(val)), {
@@ -261,6 +261,12 @@ export const approveAdmission = async (req, res) => {
       // Reuse existing account
       reusedAccount = true;
 
+      // Update student user email if not set
+      if (!studentUser.email && admission.email) {
+        studentUser.email = admission.email;
+        await studentUser.save();
+      }
+
       // Check if student is already enrolled in this course actively
       const existingEnrollment = await Enrollment.findOne({
         studentId: studentUser._id,
@@ -318,6 +324,22 @@ export const approveAdmission = async (req, res) => {
     admission.studentUserId = studentUser._id;
     admission.reviewedAt = new Date();
     await admission.save();
+
+    // 9. Send congratulations email with credentials and instructions
+    const course = await Course.findById(admission.courseId).lean();
+    const courseName = course?.name || 'Your Course';
+
+    sendAdmissionApprovalEmail({
+      studentName: studentUser.name || admission.name,
+      studentEmail: admission.email || studentUser.email,
+      studentId: studentUser.loginId,
+      password: plainPassword,
+      courseName,
+      batchName: batch.name,
+      reusedAccount,
+    }).catch((mailErr) => {
+      console.error('[Admission Approval Mail Error]:', mailErr);
+    });
 
     return res.status(200).json({
       success: true,

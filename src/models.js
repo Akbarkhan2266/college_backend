@@ -40,6 +40,8 @@ const CourseSchema = new Schema({
   slug:        { type: String, required: true, unique: true, lowercase: true, trim: true }, // public URL
   description: String,
   ageGroup:    { type: String, trim: true },   // "Class 1-5", "Adults", etc.
+  image:       { type: String, trim: true },   // URL, relative path, or base64 data
+  imageUrl:    { type: String, trim: true },   // Alias for image
   isActive:    { type: Boolean, default: true },
   isPinned:    { type: Boolean, default: false },
 }, { timestamps: true });
@@ -65,7 +67,7 @@ const BatchSchema = new Schema({
 const AdmissionSchema = new Schema({
   name:          { type: String, required: true, trim: true },
   phone:         { type: String, required: true, trim: true },
-  email:         { type: String, lowercase: true, trim: true },
+  email:         { type: String, required: true, lowercase: true, trim: true },
   guardianName:  { type: String, trim: true },
   address:       { type: String, trim: true },
   dob:           Date,

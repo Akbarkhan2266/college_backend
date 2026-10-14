@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { Notice } from '../../models.js';
+import { uploadBufferToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
 
 export const noticeSchema = z.object({
   title: z.string().trim().min(1, 'Notice title is required'),
@@ -121,8 +122,13 @@ export const createNotice = async (req, res) => {
     const { title, category, description, showOnTicker, isActive } = req.body;
 
     let pdfUrl = req.body.pdfUrl;
-    if (req.file) {
-      pdfUrl = `/uploads/notices/${req.file.filename}`;
+    if (req.file && req.file.buffer) {
+      const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
+        folder: 'college_portal/notices',
+        resource_type: 'raw',
+        format: 'pdf',
+      });
+      pdfUrl = uploadResult.secure_url;
     }
 
     const notice = await Notice.create({
@@ -141,9 +147,6 @@ export const createNotice = async (req, res) => {
       data: notice,
     });
   } catch (error) {
-    if (req.file) {
-      deleteFileSafe(req.file.filename);
-    }
     console.error('[Create Notice Error]:', error);
     return res.status(500).json({
       success: false,
@@ -159,7 +162,6 @@ export const updateNotice = async (req, res) => {
   try {
     const notice = await Notice.findById(req.params.id);
     if (!notice) {
-      if (req.file) deleteFileSafe(req.file.filename);
       return res.status(404).json({
         success: false,
         message: 'Notice not found',
@@ -174,12 +176,23 @@ export const updateNotice = async (req, res) => {
     if (showOnTicker !== undefined) notice.showOnTicker = showOnTicker === 'true' || showOnTicker === true;
     if (isActive !== undefined) notice.isActive = isActive === 'true' || isActive === true;
 
-    if (req.file) {
+    if (req.file && req.file.buffer) {
       // Remove previous PDF file if exists
       if (notice.pdfUrl) {
-        deleteFileSafe(notice.pdfUrl);
+        if (notice.pdfUrl.includes('res.cloudinary.com')) {
+          deleteFromCloudinary(notice.pdfUrl, { resource_type: 'raw' }).catch((e) =>
+            console.warn('[Notice Cloudinary Cleanup Warning]:', e.message)
+          );
+        } else {
+          deleteFileSafe(notice.pdfUrl);
+        }
       }
-      notice.pdfUrl = `/uploads/notices/${req.file.filename}`;
+      const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
+        folder: 'college_portal/notices',
+        resource_type: 'raw',
+        format: 'pdf',
+      });
+      notice.pdfUrl = uploadResult.secure_url;
     } else if (pdfUrl !== undefined) {
       notice.pdfUrl = pdfUrl;
     }
@@ -192,7 +205,6 @@ export const updateNotice = async (req, res) => {
       data: notice,
     });
   } catch (error) {
-    if (req.file) deleteFileSafe(req.file.filename);
     console.error('[Update Notice Error]:', error);
     return res.status(500).json({
       success: false,
@@ -216,7 +228,13 @@ export const deleteNotice = async (req, res) => {
 
     // Clean up associated PDF file
     if (notice.pdfUrl) {
-      deleteFileSafe(notice.pdfUrl);
+      if (notice.pdfUrl.includes('res.cloudinary.com')) {
+        deleteFromCloudinary(notice.pdfUrl, { resource_type: 'raw' }).catch((e) =>
+          console.warn('[Notice Cloudinary Cleanup Warning]:', e.message)
+        );
+      } else {
+        deleteFileSafe(notice.pdfUrl);
+      }
     }
 
     await Notice.findByIdAndDelete(req.params.id);

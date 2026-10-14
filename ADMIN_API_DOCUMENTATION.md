@@ -214,16 +214,19 @@ Complete API reference for all Admin endpoints in the College Portal Backend.
 - **Method:** `POST`
 - **URL:** `/api/admin/courses`
 - **Auth:** Admin
-- **Request Body:**
+- **Content-Type:** `application/json` or `multipart/form-data`
+- **Request Body (JSON with base64 / URL, up to 50MB):**
 ```json
 {
   "name": "Islamic Studies Level 1",
   "description": "Comprehensive course on Fiqh, Aqeedah, and Seerah",
   "ageGroup": "Class 6-10",
+  "image": "data:image/png;base64,...",
   "isActive": true,
   "isPinned": false
 }
 ```
+*(Or via `multipart/form-data` with form field `image`)*
 - **Response (201 Created):**
 ```json
 {
@@ -688,6 +691,7 @@ Complete API reference for all Admin endpoints in the College Portal Backend.
   }
 }
 ```
+*(Automatically sends a congratulations email to the student's email with their credentials, instructions to change password upon first login, and WhatsApp contact info).*
 
 ---
 

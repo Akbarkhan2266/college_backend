@@ -1,22 +1,31 @@
 import { z } from 'zod';
 import { Course, Batch, Enrollment, Admission } from '../../models.js';
 import { generateUniqueCourseSlug } from '../../utils/slugify.js';
+import {
+  uploadBufferToCloudinary,
+  uploadToCloudinary,
+  deleteFromCloudinary,
+} from '../../config/cloudinary.js';
 
 export const createCourseSchema = z.object({
   name: z.string().trim().min(1, 'Course name is required'),
   description: z.string().trim().optional(),
   ageGroup: z.string().trim().optional(),
-  isActive: z.boolean().optional(),
-  isPinned: z.boolean().optional(),
-});
+  image: z.string().optional(),
+  imageUrl: z.string().optional(),
+  isActive: z.preprocess((val) => val === 'true' || val === true, z.boolean()).optional(),
+  isPinned: z.preprocess((val) => val === 'true' || val === true, z.boolean()).optional(),
+}).passthrough();
 
 export const updateCourseSchema = z.object({
   name: z.string().trim().min(1).optional(),
   description: z.string().trim().optional(),
   ageGroup: z.string().trim().optional(),
-  isActive: z.boolean().optional(),
-  isPinned: z.boolean().optional(),
-});
+  image: z.string().optional(),
+  imageUrl: z.string().optional(),
+  isActive: z.preprocess((val) => val === 'true' || val === true, z.boolean()).optional(),
+  isPinned: z.preprocess((val) => val === 'true' || val === true, z.boolean()).optional(),
+}).passthrough();
 
 /**
  * GET /api/admin/courses
@@ -105,7 +114,25 @@ export const getCourseById = async (req, res) => {
  */
 export const createCourse = async (req, res) => {
   try {
-    const { name, description, ageGroup, isActive, isPinned } = req.body;
+    const { name, description, ageGroup, isActive, isPinned, image, imageUrl } = req.body;
+    let courseImage = image || imageUrl;
+
+    if (req.file && req.file.buffer) {
+      const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
+        folder: 'college_portal/courses',
+        resource_type: 'image',
+      });
+      courseImage = uploadResult.secure_url;
+    } else if (courseImage && !courseImage.includes('res.cloudinary.com')) {
+      if (courseImage.startsWith('data:') || courseImage.startsWith('http://') || courseImage.startsWith('https://')) {
+        const uploadResult = await uploadToCloudinary(courseImage, {
+          folder: 'college_portal/courses',
+          resource_type: 'image',
+        });
+        courseImage = uploadResult.secure_url;
+      }
+    }
+
     const slug = await generateUniqueCourseSlug(name);
 
     const course = await Course.create({
@@ -113,8 +140,10 @@ export const createCourse = async (req, res) => {
       slug,
       description,
       ageGroup,
-      isActive: isActive !== undefined ? isActive : true,
-      isPinned: isPinned !== undefined ? isPinned : false,
+      image: courseImage,
+      imageUrl: courseImage,
+      isActive: isActive !== undefined ? (isActive === 'true' || isActive === true) : true,
+      isPinned: isPinned !== undefined ? (isPinned === 'true' || isPinned === true) : false,
     });
 
     return res.status(201).json({
@@ -126,7 +155,7 @@ export const createCourse = async (req, res) => {
     console.error('[Create Course Error]:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to create course',
+      message: error.message || 'Failed to create course',
     });
   }
 };
@@ -144,7 +173,7 @@ export const updateCourse = async (req, res) => {
       });
     }
 
-    const { name, description, ageGroup, isActive, isPinned } = req.body;
+    const { name, description, ageGroup, isActive, isPinned, image, imageUrl } = req.body;
 
     if (name && name.trim() !== course.name) {
       course.name = name.trim();
@@ -153,8 +182,41 @@ export const updateCourse = async (req, res) => {
 
     if (description !== undefined) course.description = description;
     if (ageGroup !== undefined) course.ageGroup = ageGroup;
-    if (isActive !== undefined) course.isActive = isActive;
-    if (isPinned !== undefined) course.isPinned = isPinned;
+    if (isActive !== undefined) course.isActive = isActive === 'true' || isActive === true;
+    if (isPinned !== undefined) course.isPinned = isPinned === 'true' || isPinned === true;
+
+    let courseImage = image !== undefined ? image : imageUrl;
+
+    if (req.file && req.file.buffer) {
+      if (course.image && course.image.includes('res.cloudinary.com')) {
+        deleteFromCloudinary(course.image, { resource_type: 'image' }).catch((e) =>
+          console.warn('[Course Cloudinary Cleanup Warning]:', e.message)
+        );
+      }
+      const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
+        folder: 'college_portal/courses',
+        resource_type: 'image',
+      });
+      courseImage = uploadResult.secure_url;
+    } else if (courseImage && !courseImage.includes('res.cloudinary.com')) {
+      if (courseImage.startsWith('data:') || courseImage.startsWith('http://') || courseImage.startsWith('https://')) {
+        if (course.image && course.image.includes('res.cloudinary.com')) {
+          deleteFromCloudinary(course.image, { resource_type: 'image' }).catch((e) =>
+            console.warn('[Course Cloudinary Cleanup Warning]:', e.message)
+          );
+        }
+        const uploadResult = await uploadToCloudinary(courseImage, {
+          folder: 'college_portal/courses',
+          resource_type: 'image',
+        });
+        courseImage = uploadResult.secure_url;
+      }
+    }
+
+    if (courseImage !== undefined) {
+      course.image = courseImage;
+      course.imageUrl = courseImage;
+    }
 
     await course.save();
 
@@ -167,7 +229,7 @@ export const updateCourse = async (req, res) => {
     console.error('[Update Course Error]:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to update course',
+      message: error.message || 'Failed to update course',
     });
   }
 };
@@ -198,6 +260,13 @@ export const deleteCourse = async (req, res) => {
         success: false,
         message: 'Cannot delete course with associated enrollments, batches, or admissions. Please set isActive: false instead.',
       });
+    }
+
+    // Clean up associated image from Cloudinary
+    if (course.image && course.image.includes('res.cloudinary.com')) {
+      deleteFromCloudinary(course.image, { resource_type: 'image' }).catch((e) =>
+        console.warn('[Course Cloudinary Cleanup Warning]:', e.message)
+      );
     }
 
     await Course.findByIdAndDelete(id);
